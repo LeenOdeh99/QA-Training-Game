@@ -1,0 +1,973 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Bug Hunt — QA Training Game</title>
+    <link
+        href="https://fonts.googleapis.com/css2?family=Space+Mono:wght@400;700&family=Syne:wght@400;700;800&display=swap"
+        rel="stylesheet">
+    <style>
+        /* ─── Reset & Variables ─── */
+        *,
+        *::before,
+        *::after {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
+
+        :root {
+            --bg: #0d0d0f;
+            --surface: #16161a;
+            --border: #2a2a30;
+            --accent: #e8ff47;
+            --accent2: #ff4757;
+            --green: #2ecc71;
+            --red: #ff4757;
+            --text: #f0f0f0;
+            --muted: #888;
+            --font-mono: 'Space Mono', monospace;
+            --font-display: 'Syne', sans-serif;
+        }
+
+        body {
+            background: var(--bg);
+            color: var(--text);
+            font-family: var(--font-mono);
+            min-height: 100vh;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            padding: 32px 16px;
+            gap: 24px;
+        }
+
+        /* ─── Header ─── */
+        header {
+            text-align: center;
+            position: relative;
+        }
+
+        header h1 {
+            font-family: var(--font-display);
+            font-size: clamp(2rem, 5vw, 3.5rem);
+            font-weight: 800;
+            letter-spacing: -0.03em;
+            color: var(--accent);
+            text-shadow: 0 0 40px rgba(232, 255, 71, 0.25);
+        }
+
+        header p {
+            color: var(--muted);
+            font-size: 0.8rem;
+            margin-top: 6px;
+            letter-spacing: 0.1em;
+            text-transform: uppercase;
+        }
+
+        /* ─── HUD (timer, clicks, score) ─── */
+        .hud {
+            display: flex;
+            gap: 20px;
+            flex-wrap: wrap;
+            justify-content: center;
+        }
+
+        .hud-item {
+            background: var(--surface);
+            border: 1px solid var(--border);
+            border-radius: 6px;
+            padding: 10px 22px;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 2px;
+            min-width: 100px;
+        }
+
+        .hud-item .label {
+            font-size: 0.65rem;
+            text-transform: uppercase;
+            letter-spacing: 0.12em;
+            color: var(--muted);
+        }
+
+        .hud-item .value {
+            font-size: 1.6rem;
+            font-weight: 700;
+            font-family: var(--font-display);
+            color: var(--accent);
+            line-height: 1;
+        }
+
+        .hud-item .value.warning {
+            color: var(--accent2);
+        }
+
+        .hud-item .value.urgent {
+            color: var(--red);
+            animation: pulse 0.6s infinite alternate;
+        }
+
+        @keyframes pulse {
+            to {
+                opacity: 0.5;
+            }
+        }
+
+        /* ─── Game Container ─── */
+        .game-wrap {
+            position: relative;
+            border: 1px solid var(--border);
+            border-radius: 10px;
+            overflow: hidden;
+            box-shadow: 0 0 60px rgba(232, 255, 71, 0.06), 0 20px 60px rgba(0, 0, 0, 0.6);
+            cursor: crosshair;
+            max-width: 900px;
+            width: 100%;
+            user-select: none;
+        }
+
+        /* The fake UI screenshot drawn on canvas */
+        #uiCanvas {
+            display: block;
+            width: 100%;
+            height: auto;
+        }
+
+        /* Overlay for click markers */
+        #overlay {
+            position: absolute;
+            inset: 0;
+            pointer-events: none;
+            /* clicks fall through to game-wrap */
+        }
+
+        /* ─── Click Markers ─── */
+        .marker {
+            position: absolute;
+            transform: translate(-50%, -50%);
+            width: 32px;
+            height: 32px;
+            border-radius: 50%;
+            border: 2px solid var(--accent);
+            background: rgba(232, 255, 71, 0.15);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 0.6rem;
+            font-weight: 700;
+            color: var(--accent);
+            animation: markerPop 0.25s cubic-bezier(0.34, 1.56, 0.64, 1);
+            pointer-events: none;
+        }
+
+        .marker.correct {
+            border-color: var(--green);
+            background: rgba(46, 204, 113, 0.2);
+            color: var(--green);
+        }
+
+        .marker.incorrect {
+            border-color: var(--red);
+            background: rgba(255, 71, 87, 0.15);
+            color: var(--red);
+        }
+
+        @keyframes markerPop {
+            from {
+                transform: translate(-50%, -50%) scale(0);
+            }
+
+            to {
+                transform: translate(-50%, -50%) scale(1);
+            }
+        }
+
+        /* Bug zone highlight (shown after submit) */
+        .bug-zone {
+            position: absolute;
+            transform: translate(-50%, -50%);
+            border-radius: 50%;
+            border: 2px dashed var(--green);
+            background: rgba(46, 204, 113, 0.12);
+            animation: zoneReveal 0.4s ease;
+            pointer-events: none;
+        }
+
+        @keyframes zoneReveal {
+            from {
+                opacity: 0;
+                transform: translate(-50%, -50%) scale(0.5);
+            }
+
+            to {
+                opacity: 1;
+                transform: translate(-50%, -50%) scale(1);
+            }
+        }
+
+        /* ─── Controls ─── */
+        .controls {
+            display: flex;
+            gap: 12px;
+            flex-wrap: wrap;
+            justify-content: center;
+        }
+
+        button {
+            font-family: var(--font-mono);
+            font-size: 0.85rem;
+            font-weight: 700;
+            letter-spacing: 0.08em;
+            text-transform: uppercase;
+            padding: 12px 28px;
+            border-radius: 6px;
+            border: none;
+            cursor: pointer;
+            transition: transform 0.1s, box-shadow 0.1s;
+        }
+
+        button:active {
+            transform: scale(0.97);
+        }
+
+        #submitBtn {
+            background: var(--accent);
+            color: #0d0d0f;
+            box-shadow: 0 0 20px rgba(232, 255, 71, 0.3);
+        }
+
+        #submitBtn:hover {
+            box-shadow: 0 0 30px rgba(232, 255, 71, 0.5);
+        }
+
+        #submitBtn:disabled {
+            opacity: 0.35;
+            cursor: not-allowed;
+        }
+
+        #restartBtn {
+            background: transparent;
+            color: var(--muted);
+            border: 1px solid var(--border);
+        }
+
+        #restartBtn:hover {
+            color: var(--text);
+            border-color: var(--muted);
+        }
+
+        /* ─── Result Banner ─── */
+        #result {
+            display: none;
+            background: var(--surface);
+            border: 1px solid var(--border);
+            border-radius: 10px;
+            padding: 20px 36px;
+            text-align: center;
+            max-width: 500px;
+            width: 100%;
+            animation: slideUp 0.4s ease;
+        }
+
+        @keyframes slideUp {
+            from {
+                transform: translateY(20px);
+                opacity: 0;
+            }
+
+            to {
+                transform: translateY(0);
+                opacity: 1;
+            }
+        }
+
+        #result .score-line {
+            font-family: var(--font-display);
+            font-size: 2.5rem;
+            font-weight: 800;
+            color: var(--accent);
+            letter-spacing: -0.02em;
+        }
+
+        #result .breakdown {
+            margin-top: 8px;
+            font-size: 0.78rem;
+            color: var(--muted);
+            line-height: 1.7;
+        }
+
+        #result .breakdown span.hit {
+            color: var(--green);
+        }
+
+        #result .breakdown span.miss {
+            color: var(--red);
+        }
+
+        /* ─── Tooltip ─── */
+        .tip {
+            font-size: 0.72rem;
+            color: var(--muted);
+            text-align: center;
+            letter-spacing: 0.05em;
+        }
+
+        /* ─── Scanline texture overlay (aesthetic) ─── */
+        body::after {
+            content: '';
+            position: fixed;
+            inset: 0;
+            background: repeating-linear-gradient(0deg,
+                    transparent,
+                    transparent 2px,
+                    rgba(0, 0, 0, 0.04) 2px,
+                    rgba(0, 0, 0, 0.04) 4px);
+            pointer-events: none;
+            z-index: 999;
+        }
+    </style>
+</head>
+
+<body>
+
+    <header>
+        <h1>🐛 Bug Hunt</h1>
+        <p>QA Training Simulator — Find all the UI bugs</p>
+    </header>
+
+    <!-- HUD: timer, clicks remaining, round -->
+    <div class="hud">
+        <div class="hud-item">
+            <span class="label">Time</span>
+            <span class="value" id="timerDisplay">60</span>
+        </div>
+        <div class="hud-item">
+            <span class="label">Clicks Left</span>
+            <span class="value" id="clicksDisplay">8</span>
+        </div>
+        <div class="hud-item">
+            <span class="label">Bugs Hidden</span>
+            <span class="value" id="bugsDisplay">?</span>
+        </div>
+    </div>
+
+    <!-- Main game area -->
+    <div class="game-wrap" id="gameWrap">
+        <canvas id="uiCanvas" width="900" height="560"></canvas>
+        <!-- Markers and bug zones rendered here -->
+        <div id="overlay"></div>
+    </div>
+
+    <p class="tip" id="tipText">Click anywhere on the UI to mark suspected bugs → then Submit</p>
+
+    <!-- Action buttons -->
+    <div class="controls">
+        <button id="submitBtn">Submit Findings</button>
+        <button id="restartBtn">↺ New Round</button>
+    </div>
+
+    <!-- Result panel -->
+    <div id="result">
+        <div class="score-line" id="scoreLine">Score: 0 / 5</div>
+        <div class="breakdown" id="breakdown"></div>
+    </div>
+
+    <script>
+        /* ═══════════════════════════════════════════════════════
+           BUG HUNT — QA Training Game
+           ─────────────────────────────────────────────────────
+           Flow: generateUI() → user clicks → submit() → score
+           ═══════════════════════════════════════════════════════ */
+
+        // ─── Config ──────────────────────────────────────────
+        const CONFIG = {
+            MAX_CLICKS: 8,      // max markers the user can place
+            TIMER_SECONDS: 60,     // countdown per round
+            BUG_RADIUS: 38,     // hit detection radius (px on canvas)
+            JITTER: 28,     // ± random offset applied to bug positions each round
+            NUM_BUGS: 5,      // bugs per round
+        };
+
+        // ─── Canvas size reference (logical, not CSS) ────────
+        const CW = 900, CH = 560;
+
+        // ─── State ───────────────────────────────────────────
+        let state = {
+            bugs: [],   // [{x, y, label}] – bug locations this round
+            clicks: [],   // [{x, y}]        – user's clicks (% of canvas)
+            submitted: false,
+            clicksLeft: CONFIG.MAX_CLICKS,
+            timeLeft: CONFIG.TIMER_SECONDS,
+            timerID: null,
+        };
+
+        // ─── DOM references ───────────────────────────────────
+        const canvas = document.getElementById('uiCanvas');
+        const ctx = canvas.getContext('2d');
+        const overlay = document.getElementById('overlay');
+        const submitBtn = document.getElementById('submitBtn');
+        const restartBtn = document.getElementById('restartBtn');
+        const resultEl = document.getElementById('result');
+        const scoreEl = document.getElementById('scoreLine');
+        const breakdownEl = document.getElementById('breakdown');
+        const timerDisplay = document.getElementById('timerDisplay');
+        const clicksDisplay = document.getElementById('clicksDisplay');
+        const bugsDisplay = document.getElementById('bugsDisplay');
+        const tipText = document.getElementById('tipText');
+        const gameWrap = document.getElementById('gameWrap');
+
+        /* ══════════════════════════════════════════════════════
+           SECTION 1 — UI SCREENSHOT GENERATOR
+           Draws a fake app UI on canvas with deliberate bugs
+           ══════════════════════════════════════════════════════ */
+
+        /**
+         * Master list of "UI scenes" — each scene is a function
+         * that draws onto ctx and returns an array of base bug
+         * positions {x, y, label}. Positions use canvas coords.
+         */
+        const SCENES = [
+
+            // Scene A: E-commerce product page
+            function sceneEcommerce() {
+                /* ── Background ── */
+                ctx.fillStyle = '#f8f7f5';
+                ctx.fillRect(0, 0, CW, CH);
+
+                /* ── Nav bar ── */
+                ctx.fillStyle = '#fff';
+                ctx.fillRect(0, 0, CW, 56);
+                ctx.fillStyle = '#e0e0e0';
+                ctx.fillRect(0, 56, CW, 1);
+
+                // Logo
+                ctx.fillStyle = '#1a1a2e';
+                ctx.font = 'bold 18px Syne, sans-serif';
+                ctx.fillText('ShopNow', 24, 36);
+
+                // Nav links (one intentionally very light — accessibility bug)
+                ctx.fillStyle = '#333';
+                ['Home', 'Products', 'About'].forEach((t, i) => {
+                    ctx.fillText(t, 160 + i * 90, 35);
+                });
+
+                // BUG 1: Nav link "Sale" has near-invisible text color
+                ctx.fillStyle = '#f0efee'; // almost white on white bg
+                ctx.font = '15px Space Mono, monospace';
+                ctx.fillText('Sale', 430, 35);
+
+                // Cart icon area
+                ctx.fillStyle = '#1a1a2e';
+                ctx.font = '22px sans-serif';
+                ctx.fillText('🛒', 850, 38);
+                ctx.font = 'bold 11px monospace';
+                ctx.fillStyle = '#e74c3c';
+                // BUG 2: Cart badge is overlapping the icon badly (offset wrong)
+                ctx.beginPath();
+                ctx.arc(884, 16, 10, 0, Math.PI * 2);
+                ctx.fill();
+                ctx.fillStyle = '#fff';
+                ctx.font = 'bold 9px monospace';
+                ctx.fillText('3', 880, 20);
+
+                /* ── Product image placeholder ── */
+                ctx.fillStyle = '#ddd';
+                ctx.fillRect(40, 80, 320, 300);
+                ctx.fillStyle = '#bbb';
+                ctx.font = '40px sans-serif';
+                ctx.fillText('📷', 160, 255);
+
+                /* ── Product details ── */
+                ctx.fillStyle = '#1a1a2e';
+                ctx.font = 'bold 24px Syne, sans-serif';
+                ctx.fillText('Premium Wireless Headphones', 390, 110);
+
+                // Stars rating
+                ctx.font = '18px sans-serif';
+                ctx.fillStyle = '#f39c12';
+                ctx.fillText('★★★★☆', 390, 145);
+                ctx.fillStyle = '#888';
+                ctx.font = '13px monospace';
+                ctx.fillText('(4.2 / 5) — 1,234 reviews', 480, 145);
+
+                // Price: BUG 3 — sale price LARGER than original (visual hierarchy inverted)
+                ctx.fillStyle = '#aaa';
+                ctx.font = 'bold 28px Syne, sans-serif'; // original price is huge
+                ctx.fillText('$199.99', 390, 200);
+                ctx.fillStyle = '#e74c3c';
+                ctx.font = '14px monospace';  // sale price tiny
+                ctx.fillText('$149.99', 510, 200);
+
+                // Strikethrough (on the wrong price)
+                ctx.strokeStyle = '#aaa';
+                ctx.lineWidth = 2;
+                ctx.beginPath(); ctx.moveTo(505, 194); ctx.lineTo(560, 194); ctx.stroke();
+
+                // Color options
+                ctx.fillStyle = '#333';
+                ctx.font = '13px monospace';
+                ctx.fillText('Color:', 390, 240);
+                const colors = ['#1a1a2e', '#e74c3c', '#f39c12', '#fff'];
+                colors.forEach((c, i) => {
+                    ctx.fillStyle = c;
+                    ctx.strokeStyle = '#ccc';
+                    ctx.lineWidth = 1.5;
+                    ctx.beginPath();
+                    ctx.arc(440 + i * 36, 260, 12, 0, Math.PI * 2);
+                    ctx.fill(); ctx.stroke();
+                });
+
+                // Add to Cart button
+                ctx.fillStyle = '#1a1a2e';
+                ctx.beginPath();
+                ctx.roundRect(390, 290, 200, 46, 6);
+                ctx.fill();
+                ctx.fillStyle = '#fff';
+                ctx.font = 'bold 14px monospace';
+                ctx.fillText('Add to Cart', 440, 319);
+
+                // Wishlist button — BUG 4: button text is cut off / outside button bounds
+                ctx.fillStyle = '#fff';
+                ctx.strokeStyle = '#1a1a2e';
+                ctx.lineWidth = 2;
+                ctx.beginPath();
+                ctx.roundRect(605, 290, 100, 46, 6);
+                ctx.stroke(); ctx.fill();
+                ctx.fillStyle = '#1a1a2e';
+                ctx.font = 'bold 14px monospace';
+                ctx.fillText('♡ Add to Wishlist', 608, 319); // text overflows button
+
+                /* ── Reviews section ── */
+                ctx.fillStyle = '#e0e0e0';
+                ctx.fillRect(40, 400, 820, 1);
+                ctx.fillStyle = '#1a1a2e';
+                ctx.font = 'bold 16px Syne, sans-serif';
+                ctx.fillText('Customer Reviews', 40, 430);
+
+                // Review card
+                ctx.fillStyle = '#fff';
+                ctx.shadowColor = 'rgba(0,0,0,0.08)';
+                ctx.shadowBlur = 8;
+                ctx.beginPath(); ctx.roundRect(40, 448, 380, 90, 8); ctx.fill();
+                ctx.shadowBlur = 0;
+                ctx.fillStyle = '#333';
+                ctx.font = '13px monospace';
+                ctx.fillText('"Great sound quality! Very happy..."', 60, 478);
+                ctx.fillStyle = '#888';
+                ctx.font = '11px monospace';
+                ctx.fillText('— Alex M.', 60, 500);
+
+                // BUG 5: Second review card is misaligned / overlapping first one
+                ctx.fillStyle = '#fff';
+                ctx.shadowColor = 'rgba(0,0,0,0.08)';
+                ctx.shadowBlur = 8;
+                ctx.beginPath(); ctx.roundRect(360, 448, 380, 90, 8); ctx.fill(); // overlaps by 60px
+                ctx.shadowBlur = 0;
+                ctx.fillStyle = '#333';
+                ctx.font = '13px monospace';
+                ctx.fillText('"Battery life is excellent..."', 380, 478);
+                ctx.fillStyle = '#888';
+                ctx.font = '11px monospace';
+                ctx.fillText('— Jordan K.', 380, 500);
+
+                // Return predefined bug locations (canvas px)
+                return [
+                    { x: 438, y: 35, label: 'Invisible nav text (contrast bug)' },
+                    { x: 878, y: 18, label: 'Badge overlaps icon incorrectly' },
+                    { x: 460, y: 195, label: 'Sale price hierarchy inverted' },
+                    { x: 660, y: 315, label: 'Button text overflows bounds' },
+                    { x: 395, y: 488, label: 'Review cards overlapping' },
+                ];
+            },
+
+            // Scene B: Dashboard / Admin panel
+            function sceneDashboard() {
+                /* Background */
+                ctx.fillStyle = '#1e2433';
+                ctx.fillRect(0, 0, CW, CH);
+
+                /* Sidebar */
+                ctx.fillStyle = '#161c2d';
+                ctx.fillRect(0, 0, 200, CH);
+
+                ctx.fillStyle = '#7c8db0';
+                ctx.font = '13px Space Mono, monospace';
+                ['Dashboard', 'Analytics', 'Users', 'Settings', 'Help'].forEach((item, i) => {
+                    // BUG 1: "Users" item has no padding — text starts at x=0, clipped
+                    const x = item === 'Users' ? 0 : 24;
+                    ctx.fillStyle = item === 'Analytics' ? '#e8ff47' : '#7c8db0';
+                    ctx.fillText(item, x, 80 + i * 46);
+                });
+
+                /* Main area header */
+                ctx.fillStyle = '#e8ff47';
+                ctx.font = 'bold 22px Syne, sans-serif';
+                ctx.fillText('Analytics Overview', 224, 48);
+
+                /* Stat cards */
+                const cards = [
+                    { label: 'Revenue', value: '$48,320', color: '#2ecc71' },
+                    { label: 'Users', value: '12,840', color: '#3498db' },
+                    { label: 'Conversion', value: '3.4%', color: '#9b59b6' },
+                    { label: 'Bounce Rate', value: '61.2%', color: '#e74c3c' },
+                ];
+                cards.forEach((c, i) => {
+                    const x = 224 + i * 168, y = 70;
+                    ctx.fillStyle = '#252d40';
+                    ctx.beginPath(); ctx.roundRect(x, y, 155, 80, 8); ctx.fill();
+                    ctx.fillStyle = c.color;
+                    ctx.font = 'bold 20px Syne, sans-serif';
+                    ctx.fillText(c.value, x + 14, y + 36);
+                    ctx.fillStyle = '#7c8db0';
+                    ctx.font = '11px monospace';
+                    ctx.fillText(c.label, x + 14, y + 58);
+                    // BUG 2: Last card overflows its container (x too far right)
+                });
+
+                /* Chart area */
+                ctx.fillStyle = '#252d40';
+                ctx.beginPath(); ctx.roundRect(224, 168, 510, 220, 10); ctx.fill();
+
+                ctx.fillStyle = '#7c8db0';
+                ctx.font = '12px monospace';
+                ctx.fillText('Monthly Revenue', 244, 200);
+
+                // Draw bar chart
+                const barData = [42, 67, 55, 80, 71, 93, 60, 84, 50, 75, 88, 95];
+                const barW = 32, gap = 10, startX = 244;
+                barData.forEach((v, i) => {
+                    const bh = v * 1.6;
+                    const bx = startX + i * (barW + gap);
+                    const by = 355 - bh;
+                    ctx.fillStyle = i === 5 ? '#e8ff47' : '#3b4a6b';
+                    ctx.beginPath(); ctx.roundRect(bx, by, barW, bh, 4); ctx.fill();
+                });
+
+                // Month labels — BUG 3: labels are rotated but overlap each other
+                const months = ['J', 'F', 'M', 'A', 'M', 'J', 'J', 'A', 'S', 'O', 'N', 'D'];
+                ctx.fillStyle = '#7c8db0';
+                ctx.font = '10px monospace';
+                ctx.save();
+                months.forEach((m, i) => {
+                    const bx = startX + i * (barW + gap) + barW / 2;
+                    ctx.save();
+                    ctx.translate(bx, 368);
+                    ctx.rotate(-0.9); // too steep, causes overlap
+                    ctx.fillText(m + '-24', -14, 0);
+                    ctx.restore();
+                });
+                ctx.restore();
+
+                /* Table */
+                ctx.fillStyle = '#252d40';
+                ctx.beginPath(); ctx.roundRect(224, 408, 510, 130, 10); ctx.fill();
+
+                ctx.fillStyle = '#7c8db0';
+                ctx.font = '11px monospace';
+                ctx.fillText('Recent Transactions', 244, 434);
+
+                const rows = [
+                    ['#1042', 'Alice T.', '$299', 'Completed'],
+                    ['#1043', 'Bob S.', '$89', 'Pending'],
+                    ['#1044', 'Carol M.', '$499', 'Completed'],
+                ];
+                rows.forEach((row, ri) => {
+                    const ry = 454 + ri * 28;
+                    row.forEach((cell, ci) => {
+                        ctx.fillStyle = ci === 3
+                            ? (cell === 'Completed' ? '#2ecc71' : '#f39c12')
+                            : '#c8d0e0';
+                        ctx.font = '11px monospace';
+                        ctx.fillText(cell, 244 + ci * 130, ry);
+                    });
+                });
+
+                /* Right panel — Notification list */
+                ctx.fillStyle = '#252d40';
+                ctx.beginPath(); ctx.roundRect(748, 70, 140, 468, 10); ctx.fill();
+
+                ctx.fillStyle = '#e8ff47';
+                ctx.font = 'bold 12px Syne, sans-serif';
+                ctx.fillText('Alerts', 768, 100);
+
+                const alerts = ['Server load 90%', 'New user signup', 'Payment failed', 'Disk 80% full', 'API error x3'];
+                alerts.forEach((a, i) => {
+                    // BUG 4: Alert items have no line spacing — they are vertically squished / overlapping
+                    ctx.fillStyle = '#7c8db0';
+                    ctx.font = '10px monospace';
+                    ctx.fillText(a, 762, 122 + i * 14); // 14px line height is too tight for 10px font
+                });
+
+                // BUG 5: "Help" sidebar item is completely off-screen / below visible area
+                // (already drawn at y=80+4*46=264 — fine. Instead introduce a visual bug:)
+                // Settings icon is missing label — draw unlabeled icon
+                ctx.fillStyle = '#3b4a6b';
+                ctx.beginPath(); ctx.arc(100, 510, 18, 0, Math.PI * 2); ctx.fill();
+                ctx.fillStyle = '#fff';
+                ctx.font = '18px sans-serif';
+                ctx.fillText('⚙', 89, 518); // no label, inconsistent with other items
+
+                return [
+                    { x: 24, y: 172, label: 'Sidebar item missing left padding' },
+                    { x: 818, y: 118, label: 'Alert text line-height too tight (overlap)' },
+                    { x: 348, y: 358, label: 'Chart month labels overlapping (rotation)' },
+                    { x: 100, y: 510, label: 'Settings icon missing label' },
+                    { x: 750, y: 110, label: 'Alerts panel header misaligned' },
+                ];
+            },
+
+        ];
+
+        /* ══════════════════════════════════════════════════════
+           SECTION 2 — GAME INITIALIZATION
+           ══════════════════════════════════════════════════════ */
+
+        function initRound() {
+            // Reset state
+            state.bugs = [];
+            state.clicks = [];
+            state.submitted = false;
+            state.clicksLeft = CONFIG.MAX_CLICKS;
+            state.timeLeft = CONFIG.TIMER_SECONDS;
+
+            // Clear overlay markers
+            overlay.innerHTML = '';
+
+            // Hide result
+            resultEl.style.display = 'none';
+
+            // Re-enable submit, restore cursor
+            submitBtn.disabled = false;
+            gameWrap.style.cursor = 'crosshair';
+            tipText.textContent = 'Click anywhere on the UI to mark suspected bugs → then Submit';
+
+            // Pick a random scene
+            const scene = SCENES[Math.floor(Math.random() * SCENES.length)];
+
+            // Draw scene and get base bug positions
+            ctx.clearRect(0, 0, CW, CH);
+            const baseBugs = scene();
+
+            // Shuffle and pick NUM_BUGS (allows varying counts)
+            const shuffled = baseBugs.sort(() => Math.random() - 0.5);
+            const picked = shuffled.slice(0, CONFIG.NUM_BUGS);
+
+            // Apply random jitter to each bug position
+            state.bugs = picked.map(b => ({
+                x: clamp(b.x + randInt(-CONFIG.JITTER, CONFIG.JITTER), 10, CW - 10),
+                y: clamp(b.y + randInt(-CONFIG.JITTER, CONFIG.JITTER), 10, CH - 10),
+                label: b.label,
+                found: false,
+            }));
+
+            // Update HUD
+            bugsDisplay.textContent = state.bugs.length;
+            clicksDisplay.textContent = state.clicksLeft;
+            timerDisplay.textContent = state.timeLeft;
+            timerDisplay.className = 'value';
+
+            // Start countdown
+            clearInterval(state.timerID);
+            state.timerID = setInterval(tickTimer, 1000);
+        }
+
+        /* ══════════════════════════════════════════════════════
+           SECTION 3 — TIMER
+           ══════════════════════════════════════════════════════ */
+
+        function tickTimer() {
+            if (state.submitted) { clearInterval(state.timerID); return; }
+
+            state.timeLeft--;
+            timerDisplay.textContent = state.timeLeft;
+
+            // Visual urgency cues
+            if (state.timeLeft <= 10) {
+                timerDisplay.className = 'value urgent';
+            } else if (state.timeLeft <= 20) {
+                timerDisplay.className = 'value warning';
+            }
+
+            // Auto-submit when time runs out
+            if (state.timeLeft <= 0) {
+                clearInterval(state.timerID);
+                submitFindings();
+            }
+        }
+
+        /* ══════════════════════════════════════════════════════
+           SECTION 4 — CLICK HANDLING
+           ══════════════════════════════════════════════════════ */
+
+        gameWrap.addEventListener('click', function (e) {
+            if (state.submitted) return;   // no clicks after submission
+            if (state.clicksLeft <= 0) return;
+
+            // Calculate click position relative to canvas element (CSS pixels)
+            const rect = canvas.getBoundingClientRect();
+            const cssX = e.clientX - rect.left;
+            const cssY = e.clientY - rect.top;
+
+            // Scale to canvas logical coordinates
+            const scaleX = CW / rect.width;
+            const scaleY = CH / rect.height;
+            const canvasX = cssX * scaleX;
+            const canvasY = cssY * scaleY;
+
+            // Record click
+            state.clicks.push({ x: canvasX, y: canvasY });
+            state.clicksLeft--;
+            clicksDisplay.textContent = state.clicksLeft;
+
+            // Place visual marker on overlay (use CSS % for responsive positioning)
+            placeMarker(cssX / rect.width * 100, cssY / rect.height * 100, state.clicks.length, '');
+
+            // Auto-submit if user has used all clicks
+            if (state.clicksLeft <= 0) {
+                setTimeout(submitFindings, 300);
+            }
+        });
+
+        /**
+         * Creates a circular marker on the overlay.
+         * @param {number} xPct  - horizontal position as % of overlay width
+         * @param {number} yPct  - vertical position as % of overlay height
+         * @param {number} index - click number label
+         * @param {string} cls   - extra CSS class ('correct'|'incorrect'|'')
+         */
+        function placeMarker(xPct, yPct, index, cls) {
+            const el = document.createElement('div');
+            el.className = 'marker ' + cls;
+            el.textContent = index;
+            el.style.left = xPct + '%';
+            el.style.top = yPct + '%';
+            el.dataset.index = index;
+            overlay.appendChild(el);
+            return el;
+        }
+
+        /* ══════════════════════════════════════════════════════
+           SECTION 5 — SCORING & SUBMISSION
+           ══════════════════════════════════════════════════════ */
+
+        function submitFindings() {
+            if (state.submitted) return;
+            state.submitted = true;
+
+            clearInterval(state.timerID);
+            submitBtn.disabled = true;
+            gameWrap.style.cursor = 'default';
+            tipText.textContent = 'Review the results below ↓';
+
+            const rect = canvas.getBoundingClientRect();
+
+            let hits = 0;
+            let misses = 0;
+
+            // --- Mark each user click as correct or incorrect ---
+            state.clicks.forEach((click, i) => {
+                const markerEl = overlay.querySelector(`[data-index="${i + 1}"]`);
+
+                // Check if this click is within radius of any un-found bug
+                let matched = false;
+                for (const bug of state.bugs) {
+                    if (!bug.found) {
+                        const dist = Math.hypot(click.x - bug.x, click.y - bug.y);
+                        if (dist <= CONFIG.BUG_RADIUS) {
+                            bug.found = true;
+                            matched = true;
+                            hits++;
+                            break;
+                        }
+                    }
+                }
+
+                // Update marker styling
+                if (markerEl) {
+                    markerEl.classList.add(matched ? 'correct' : 'incorrect');
+                }
+                if (!matched) misses++;
+            });
+
+            // --- Reveal all bug zones on the overlay ---
+            state.bugs.forEach(bug => {
+                // Convert canvas px → CSS % for the overlay
+                const xPct = (bug.x / CW) * 100;
+                const yPct = (bug.y / CH) * 100;
+
+                // Size the bug-zone circle relative to the overlay element's width
+                // BUG_RADIUS is in canvas px; convert to % of canvas width
+                const radiusPct = (CONFIG.BUG_RADIUS / CW) * 100;
+
+                const zone = document.createElement('div');
+                zone.className = 'bug-zone';
+                zone.style.left = xPct + '%';
+                zone.style.top = yPct + '%';
+                zone.style.width = (radiusPct * 2) + '%';
+                zone.style.height = (radiusPct * 2 / (CH / CW)) + '%'; // correct for aspect ratio
+                overlay.appendChild(zone);
+
+                // Add a small label tooltip
+                const tip = document.createElement('div');
+                tip.style.cssText = `
+      position:absolute;
+      left:${xPct}%;
+      top:${yPct + radiusPct * 1.2}%;
+      transform:translate(-50%,0);
+      font-family:monospace;
+      font-size:9px;
+      color:#2ecc71;
+      white-space:nowrap;
+      background:rgba(0,0,0,0.7);
+      padding:2px 5px;
+      border-radius:3px;
+      pointer-events:none;
+    `;
+                tip.textContent = '🐛 ' + bug.label;
+                overlay.appendChild(tip);
+            });
+
+            // --- Show result panel ---
+            const total = state.bugs.length;
+            scoreEl.textContent = `Score: ${hits} / ${total}`;
+
+            const pct = Math.round((hits / total) * 100);
+            let grade = pct >= 80 ? '🏆 Excellent QA!' : pct >= 60 ? '👍 Good eye!' : pct >= 40 ? '🔍 Keep practising' : '🐣 Beginner — try again!';
+
+            breakdownEl.innerHTML = `
+    <span class="hit">✓ ${hits} bug${hits !== 1 ? 's' : ''} found correctly</span><br>
+    <span class="miss">✗ ${misses} false positive${misses !== 1 ? 's' : ''}</span><br>
+    ${total - hits > 0 ? `<span style="color:#888">${total - hits} bug${(total - hits) !== 1 ? 's' : ''} missed</span><br>` : ''}
+    <br>${grade}
+  `;
+
+            resultEl.style.display = 'block';
+        }
+
+        /* ══════════════════════════════════════════════════════
+           SECTION 6 — EVENT LISTENERS
+           ══════════════════════════════════════════════════════ */
+
+        submitBtn.addEventListener('click', submitFindings);
+        restartBtn.addEventListener('click', initRound);
+
+        /* ══════════════════════════════════════════════════════
+           SECTION 7 — UTILITY FUNCTIONS
+           ══════════════════════════════════════════════════════ */
+
+        /** Clamp a value between min and max */
+        function clamp(v, min, max) { return Math.max(min, Math.min(max, v)); }
+
+        /** Random integer between a and b (inclusive) */
+        function randInt(a, b) { return Math.floor(Math.random() * (b - a + 1)) + a; }
+
+        /* ── Start the first round ── */
+        initRound();
+    </script>
+</body>
+
+</html>
